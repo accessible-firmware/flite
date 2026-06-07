@@ -68,7 +68,7 @@ the C runtime from Rust:
 
 ## Prerequisites
 
-- **clang / LLVM 19+** (needs the `x86_64-unknown-uefi` target; check with `clang --target=x86_64-unknown-uefi -E -x c /dev/null`), plus `llvm-ar`.
+- **clang / LLVM 21+** (needs a *working* `x86_64-unknown-uefi` target; check with `clang --target=x86_64-unknown-uefi -c -x c /dev/null -o /dev/null`), plus `llvm-ar`. LLVM 19/20 *recognize* the triple but emit a COFF datalayout the backend rejects (`backend data layout 'e-m:w-…' does not match … 'e-m:e-…'`); the fix (llvm/llvm-project#120632, #127290) first shipped in LLVM 21.
 - **Rust nightly** with the UEFI target: `rustup toolchain install nightly && rustup target add --toolchain nightly x86_64-unknown-uefi` (the printf shim uses the nightly `c_variadic` feature).
 - **QEMU** (`qemu-system-x86_64`) and **OVMF** firmware. On Arch: `pacman -S qemu-full edk2-ovmf`. Override the OVMF paths for your distro, e.g.  Debian/Ubuntu: `make qemu OVMF_CODE=/usr/share/OVMF/OVMF_CODE.fd OVMF_VARS=/usr/share/OVMF/OVMF_VARS.fd`.
 - `python3` (the `coff`/`elf` targets use it to read `compile_commands.json`).
