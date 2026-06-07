@@ -96,7 +96,15 @@ ELF_FLAGS := --target=x86_64-unknown-none -mcmodel=large \
 
 # --- Source / object lists --------------------------------------------------
 # The flite C file set lives in compile_commands.json (absolute paths under
-# the repo root). Derive object names by mangling the repo-relative path:
+# the repo root). It is a generated artifact (see the compile-commands target);
+# auto-generate it on first use so a fresh checkout builds without it committed.
+ifeq ($(wildcard $(COMPILE_COMMANDS)),)
+$(info compile_commands.json not found — generating it)
+$(shell $(PYTHON) $(MAKEFILE_DIR)/tools/gen_compile_commands.py \
+	$(REPO_ROOT) $(COMPILE_COMMANDS) $(MAKEFILE_DIR)/math_bridge.c)
+endif
+
+# Derive object names by mangling the repo-relative path:
 # src/audio/audio.c -> src_audio_audio.o (so flat obj dirs don't collide).
 SRCS := $(shell $(PYTHON) -c "import json; print('\n'.join(e['file'] for e in json.load(open('$(COMPILE_COMMANDS)'))))")
 
@@ -109,8 +117,8 @@ ELF_OBJS  := $(foreach s,$(SRCS),$(ELF_OBJ_DIR)/$(call mangle,$(s)).o)
 # --- Default ----------------------------------------------------------------
 .DEFAULT_GOAL := all
 
-.PHONY: all archives coff elf synth consumer-demo qemu run \
-        native native-test clean clean-archives distclean help
+.PHONY: all archives coff elf synth consumer-demo qemu qemu-test run \
+        native native-test compile-commands clean clean-archives distclean help
 
 all: archives synth
 
@@ -180,6 +188,14 @@ qemu: synth
 	@echo
 	@echo "=== QEMU exited ==="
 
+# qemu-test: the same check CI runs — boot synth.efi, assert it writes hello.wav,
+# and verify the result is bit-identical to tests/golden/hello.wav. Override the
+# controller with HDA=ich9-intel-hda. OVMF paths are auto-detected across distros
+# by the script; force them with env vars, e.g. OVMF_CODE=/... make qemu-test.
+HDA ?= intel-hda
+qemu-test: synth
+	QEMU_TIMEOUT="$(QEMU_TIMEOUT)" $(MAKEFILE_DIR)/tests/run-qemu-test.sh $(HDA)
+
 # --- Native host build / test -----------------------------------------------
 # Build flite natively in the repo root (produces the host static libs the
 # sanity test links against). Idempotent-ish: re-running make is cheap.
@@ -187,6 +203,16 @@ native:
 	cd $(REPO_ROOT) && ./configure --with-audio=none CFLAGS="-g -O2 -fPIC -DDIE_ON_ERROR"
 	$(MAKE) -C $(REPO_ROOT)
 	$(MAKE) -C $(REPO_ROOT)/lang/cmu_us_slt
+
+# --- compile_commands.json generation --------------------------------------
+# (Re)generate compile_commands.json by enumerating the flite library sources
+# the freestanding build needs (see tools/gen_compile_commands.py). The
+# cross-builds read only the `file` entries, so this just settles the source
+# set; the output carries this checkout's absolute paths and is a generated
+# artifact that need NOT be committed. See DEVELOPER_GUIDE.md.
+compile-commands:
+	$(PYTHON) $(MAKEFILE_DIR)/tools/gen_compile_commands.py \
+		$(REPO_ROOT) $(COMPILE_COMMANDS) $(MAKEFILE_DIR)/math_bridge.c
 
 # CP-A: sanity-check flite C + compiled-in cmu_us_slt voice on the host.
 native-test:
@@ -228,6 +254,9 @@ help:
 	@echo "  synth          build the synth.efi demo (needs nightly + UEFI target)"
 	@echo "  consumer-demo  build the consumer-demo crate"
 	@echo "  qemu / run     boot synth.efi under QEMU + OVMF"
+	@echo "  qemu-test      boot under QEMU and assert hello.wav matches the golden ref"
+	@echo "                 (HDA=intel-hda|ich9-intel-hda; the CI test)"
+	@echo "  compile-commands  regenerate compile_commands.json (generated artifact)"
 	@echo "  native         build flite natively (host static libs)"
 	@echo "  native-test    host sanity check of the C library + voice"
 	@echo "  clean          remove build intermediates, target dirs, esp/, logs, tmp"
