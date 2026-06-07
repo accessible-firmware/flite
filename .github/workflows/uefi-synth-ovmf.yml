@@ -20,7 +20,7 @@ name: UEFI synth (OVMF)
 
 on:
   push:
-  pull_request:
+		- master
   workflow_dispatch:
 
 permissions:
