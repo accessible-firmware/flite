@@ -4,10 +4,39 @@ This describes the process of updating, patching, and upstreaming new features i
 
 ## Add a voice/featureset already supported by Flite
 
-1. Add its path to an entre in `freestanding-port/compile_commands.json)
+1. Add the voice/feature's source directory to the `SELECTION` map in
+   `freestanding-port/tools/gen_compile_commands.py` (e.g. `"lang/cmu_us_awb": "all"`),
+   then `make compile-commands` to regenerate the source list.
 2. `make coff && make elf` (make for both x86 UEFI and x86 freestanding)
 3. Determine if there is a new symbol to fill in by running: `TODO`
 4. If there is, add it to `flite-freestanding/src/shim.rs` and to `ueffi-undefined-symbols.txt`
+
+## Regenerating `compile_commands.json`
+
+`freestanding-port/compile_commands.json` is a **generated artifact**, not a
+source of truth — it lists which flite C files the cross-build compiles, with
+absolute paths for *this* checkout. The source of truth is the `SELECTION` map in
+`tools/gen_compile_commands.py`.
+
+- Regenerate it any time the source set changes: `make compile-commands`.
+- The cross-builds (`make coff`/`make elf`) also auto-generate it if it's missing,
+  so a fresh checkout builds without a committed copy.
+- Because it carries machine-local absolute paths, **you don't need to commit it**
+  (CI regenerates its own — see `.github/workflows/uefi-synth-ovmf.yml`). If it's
+  still tracked, `git rm --cached freestanding-port/compile_commands.json` to stop
+  tracking it; it's covered by `.gitignore`.
+- Only the `file` entries matter to the build; the `command` field is filler for
+  editor tooling. The real compile flags come from `COFF_FLAGS`/`ELF_FLAGS` in the
+  `Makefile` (which is where `-DDIE_ON_ERROR`, `-DCST_AUDIO_NONE`, soft-float, etc.
+  actually live).
+
+## Run the QEMU/OVMF test
+
+`make qemu-test` boots `synth.efi` under QEMU + OVMF and asserts it writes a
+`hello.wav` that is bit-identical to `tests/golden/hello.wav` (override the HDA
+controller with `HDA=ich9-intel-hda`). This is the same check CI runs via
+`tests/run-qemu-test.sh` across both Intel HDA controllers. If a deliberate
+change alters the output, regenerate the golden file (see `tests/golden/README.md`).
 
 ## Expose a new C-compatible API
 
