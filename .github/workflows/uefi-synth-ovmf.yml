@@ -39,11 +39,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install QEMU + OVMF
+      - name: Install QEMU + OVMF + mtools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            qemu-system-x86 ovmf python3
+            qemu-system-x86 ovmf mtools python3
 
       - name: Install clang/LLVM 21
         run: |

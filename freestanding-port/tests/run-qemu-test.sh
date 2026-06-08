@@ -10,6 +10,13 @@
 # the CI matrix also runs ich9-intel-hda). The codec is attached but unused —
 # the app's output is a WAV file; this wires up the device for later audio work.
 #
+# The ESP is a real FAT image driven via mtools, NOT QEMU's `fat:rw:` directory
+# backend: VVFAT's write-back of newly created files to the host is unreliable
+# and version-dependent (it silently dropped hello.wav on CI's QEMU). A raw FAT
+# image stores guest block writes verbatim, so we read hello.wav straight back
+# out with `mcopy` after the run.
+#
+# Requires: qemu-system-x86_64, OVMF, mtools (mformat/mmd/mcopy).
 # Overridable via environment:
 #   EFI_APP       path to synth.efi (default: the crate's debug build output)
 #   GOLDEN        golden WAV to compare against (default: tests/golden/hello.wav;
@@ -26,7 +33,8 @@ FS_DIR="$(dirname "$HERE")"
 EFI_APP="${EFI_APP:-$FS_DIR/flite-freestanding/target/x86_64-unknown-uefi/debug/examples/synth.efi}"
 GOLDEN="${GOLDEN-$FS_DIR/tests/golden/hello.wav}"
 QEMU_TIMEOUT="${QEMU_TIMEOUT:-90}"
-ESP_DIR="$FS_DIR/esp"
+ESP_IMG="$FS_DIR/esp-$HDA.img"
+OUT_WAV="$FS_DIR/hello-$HDA.wav"
 LOG="$FS_DIR/qemu-$HDA.log"
 
 die() { echo "::error::$*" >&2; exit 1; }
@@ -47,11 +55,17 @@ OVMF_VARS="${OVMF_VARS:-$(pick \
 [ -f "$EFI_APP" ]   || die "synth.efi not found at $EFI_APP (run 'make synth' first)"
 [ -n "$OVMF_CODE" ] || die "could not locate OVMF_CODE.fd — set OVMF_CODE"
 [ -n "$OVMF_VARS" ] || die "could not locate OVMF_VARS.fd — set OVMF_VARS"
+command -v mformat >/dev/null || die "mtools not found (install 'mtools')"
 
-# --- stage the ESP ----------------------------------------------------------
-rm -rf "$ESP_DIR"
-mkdir -p "$ESP_DIR/EFI/BOOT"
-cp "$EFI_APP" "$ESP_DIR/EFI/BOOT/BOOTX64.EFI"
+# --- build the ESP image ----------------------------------------------------
+# 64 MiB FAT32 (the usual ESP layout): EFI/BOOT/BOOTX64.EFI is the removable-
+# media default boot path, so OVMF runs it automatically at power-on.
+rm -f "$ESP_IMG" "$OUT_WAV"
+dd if=/dev/zero of="$ESP_IMG" bs=1M count=64 status=none
+mformat -i "$ESP_IMG" -F ::
+mmd -i "$ESP_IMG" ::/EFI ::/EFI/BOOT
+mcopy -i "$ESP_IMG" "$EFI_APP" ::/EFI/BOOT/BOOTX64.EFI
+
 VARS_RW="$(mktemp)"
 cp "$OVMF_VARS" "$VARS_RW"
 trap 'rm -f "$VARS_RW"' EXIT
@@ -59,13 +73,15 @@ trap 'rm -f "$VARS_RW"' EXIT
 # --- boot -------------------------------------------------------------------
 # The app writes hello.wav then returns to the firmware boot menu, which sits
 # idle — so QEMU is stopped by `timeout`; success is decided by the serial log
-# and the produced file, not QEMU's exit code.
+# and the file extracted from the image, not QEMU's exit code. The firmware
+# flushes the file to the block device when the app closes it, so it is present
+# in the image well before the timeout fires.
 echo "=== booting QEMU q35 with -device $HDA (timeout ${QEMU_TIMEOUT}s) ==="
 timeout "$QEMU_TIMEOUT" qemu-system-x86_64 \
   -machine q35 -m 256 -nographic \
   -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
   -drive if=pflash,format=raw,unit=1,file="$VARS_RW" \
-  -drive format=raw,file=fat:rw:"$ESP_DIR" \
+  -drive format=raw,file="$ESP_IMG" \
   -audiodev none,id=snd0 \
   -device "$HDA",id=hda0 \
   -device hda-output,bus=hda0.0,audiodev=snd0 \
@@ -78,16 +94,18 @@ echo "-------------------------------------"
 # --- verify -----------------------------------------------------------------
 grep -aq "FLITE-UEFI: SYNTHESIS OK" "$LOG" || die "synthesis did not complete"
 grep -aq "FLITE-UEFI: WAV WRITE OK" "$LOG" || die "WAV was not written"
-WAV="$ESP_DIR/EFI/BOOT/hello.wav"
-[ -f "$WAV" ] || die "hello.wav missing on the ESP after the run"
+
+# Pull the file the app wrote back out of the image.
+mcopy -i "$ESP_IMG" ::/EFI/BOOT/hello.wav "$OUT_WAV" 2>/dev/null \
+  || die "hello.wav not found in the ESP image after the run"
 
 if [ -n "$GOLDEN" ]; then
-  if ! cmp "$WAV" "$GOLDEN"; then
-    echo "produced: $(sha256sum "$WAV")"
+  if ! cmp "$OUT_WAV" "$GOLDEN"; then
+    echo "produced: $(sha256sum "$OUT_WAV")"
     echo "golden:   $(sha256sum "$GOLDEN")"
     die "produced hello.wav differs from golden reference ($GOLDEN)"
   fi
   echo "PASS [$HDA]: hello.wav written and bit-identical to golden reference"
 else
-  echo "PASS [$HDA]: hello.wav written ($(stat -c%s "$WAV") bytes); golden comparison skipped"
+  echo "PASS [$HDA]: hello.wav written ($(stat -c%s "$OUT_WAV") bytes); golden comparison skipped"
 fi
