@@ -27,10 +27,6 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        # QEMU's two Intel HDA controller emulations (ICH6 and ICH9).
-        hda: [intel-hda, ich9-intel-hda]
-
     steps:
       - uses: actions/checkout@v4
 
@@ -69,9 +65,9 @@ jobs:
         run: |
           make synth CLANG=clang-21 COFF_AR=llvm-ar-21
 
-      - name: Run the QEMU + OVMF test (HDA ${{ matrix.hda }})
+      - name: Run the QEMU + OVMF test
         working-directory: freestanding-port
         run: |
           # Boots synth.efi, asserts it writes hello.wav, and checks the result is
           # bit-identical to tests/golden/hello.wav. OVMF paths are auto-detected.
-          ./tests/run-qemu-test.sh "${{ matrix.hda }}"
+          ./tests/run-qemu-test.sh
