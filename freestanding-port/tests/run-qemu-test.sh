@@ -4,11 +4,7 @@
 # and (unless disabled) check the result is bit-identical to the golden WAV.
 #
 # Usage:
-#   tests/run-qemu-test.sh [HDA_CONTROLLER]
-#
-# HDA_CONTROLLER is the QEMU Intel HDA controller to attach (default intel-hda;
-# the CI matrix also runs ich9-intel-hda). The codec is attached but unused —
-# the app's output is a WAV file; this wires up the device for later audio work.
+#   tests/run-qemu-test.sh
 #
 # The ESP is a real FAT image driven via mtools, NOT QEMU's `fat:rw:` directory
 # backend: VVFAT's write-back of newly created files to the host is unreliable
@@ -26,16 +22,15 @@
 #   QEMU_TIMEOUT  seconds before QEMU is stopped (default 90)
 set -euo pipefail
 
-HDA="${1:-intel-hda}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FS_DIR="$(dirname "$HERE")"
 
 EFI_APP="${EFI_APP:-$FS_DIR/flite-freestanding/target/x86_64-unknown-uefi/debug/examples/synth.efi}"
 GOLDEN="${GOLDEN-$FS_DIR/tests/golden/hello.wav}"
 QEMU_TIMEOUT="${QEMU_TIMEOUT:-90}"
-ESP_IMG="$FS_DIR/esp-$HDA.img"
-OUT_WAV="$FS_DIR/hello-$HDA.wav"
-LOG="$FS_DIR/qemu-$HDA.log"
+ESP_IMG="$FS_DIR/esp.img"
+OUT_WAV="$FS_DIR/hello.wav"
+LOG="$FS_DIR/qemu.log"
 
 die() { echo "::error::$*" >&2; exit 1; }
 
@@ -76,15 +71,12 @@ trap 'rm -f "$VARS_RW"' EXIT
 # and the file extracted from the image, not QEMU's exit code. The firmware
 # flushes the file to the block device when the app closes it, so it is present
 # in the image well before the timeout fires.
-echo "=== booting QEMU q35 with -device $HDA (timeout ${QEMU_TIMEOUT}s) ==="
+echo "=== booting QEMU q35 (timeout ${QEMU_TIMEOUT}s) ==="
 timeout "$QEMU_TIMEOUT" qemu-system-x86_64 \
   -machine q35 -m 256 -nographic \
   -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
   -drive if=pflash,format=raw,unit=1,file="$VARS_RW" \
   -drive format=raw,file="$ESP_IMG" \
-  -audiodev none,id=snd0 \
-  -device "$HDA",id=hda0 \
-  -device hda-output,bus=hda0.0,audiodev=snd0 \
   -net none > "$LOG" 2>&1 || true
 
 echo "--- serial log (FLITE-UEFI lines) ---"
@@ -105,7 +97,7 @@ if [ -n "$GOLDEN" ]; then
     echo "golden:   $(sha256sum "$GOLDEN")"
     die "produced hello.wav differs from golden reference ($GOLDEN)"
   fi
-  echo "PASS [$HDA]: hello.wav written and bit-identical to golden reference"
+  echo "PASS: hello.wav written and bit-identical to golden reference"
 else
-  echo "PASS [$HDA]: hello.wav written ($(stat -c%s "$OUT_WAV") bytes); golden comparison skipped"
+  echo "PASS: hello.wav written ($(stat -c%s "$OUT_WAV") bytes); golden comparison skipped"
 fi

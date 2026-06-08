@@ -3,11 +3,6 @@
 # environment. The produced WAV must be byte-for-byte identical to the checked-in
 # golden reference (freestanding-port/tests/golden/hello.wav).
 #
-# The job runs across a matrix of QEMU's two Intel HDA controller models. The HDA
-# device is attached but not yet used by the firmware app (output is a WAV file,
-# UEFI has no standard audio protocol) — the matrix exists so a later audio
-# expansion can drive real playback through each controller without reworking CI.
-#
 # Determinism note: synthesis output is fully deterministic — flite's rand() is a
 # fixed-seed LCG, all floating-point math is performed by the pinned `libm` crate
 # (via Cargo.lock) and IEEE-exact soft-float libcalls from `compiler_builtins`.
