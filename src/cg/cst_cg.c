@@ -267,11 +267,21 @@ static cst_utterance *cg_make_params(cst_utterance *utt)
     num_frames = 0;
     dur_stretch = get_param_float(utt->features,"duration_stretch", 1.0);
 
+    /* ROBUSTNESS: clamp `duration_stretch` to a sane range. It comes from a
+       caller-supplied float feature (set from Rust via feat_set_float()), and a
+       bad value here -- NaN, or an absurd magnitude -- makes `rdur` and `end`
+       below explode, so the frame loop `(num_frames*frame_advance) <= end` runs
+       essentially forever = a hard system lockup on bare metal. Reject anything
+       outside a sane range (the negated compare also catches NaN) and fall back
+       to 1.0 = normal speed. Same guard for the per-token stretch. */
+    if (!(dur_stretch > 0.05f && dur_stretch < 20.0f))
+        dur_stretch = 1.0f;
+
     for (s = utt_rel_head(utt,"HMMstate"); s; s=item_next(s))
     {
         start = end;
         tok_stretch = ffeature_float(s,"R:segstate.parent.R:SylStructure.parent.parent.R:Token.parent.local_duration_stretch");
-        if (tok_stretch == 0)
+        if (!(tok_stretch > 0.05f && tok_stretch < 20.0f))
             tok_stretch = 1.0;
         rdur = tok_stretch*dur_stretch*cg_state_duration(s,cg_db);
         /* Guarantee duration to be alt least one frame */
@@ -283,6 +293,12 @@ static cst_utterance *cg_make_params(cst_utterance *utt)
         mcep_parent = relation_append(mcep_link, s);
         for ( ; (num_frames * cg_db->frame_advance) <= end; num_frames++ )
         {
+            /* Safety backstop: a sane utterance is far under 100k frames
+               (100k * 5ms = 500s of audio). If the loop bound is ever broken
+               again (frame_advance==0 or `end` garbage), break rather than
+               hard-lock the machine — a clipped utterance beats a dead boot. */
+            if (num_frames > 100000)
+                break;
             mcep_frame = relation_append(mcep,NULL);
             item_add_daughter(mcep_parent,mcep_frame);
             item_set_int(mcep_frame,"frame_number",num_frames);

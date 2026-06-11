@@ -1,0 +1,10 @@
+esp/
+obj/
+obj-elf/
+*.log
+# Generated build artifacts (see DEVELOPER_GUIDE.md):
+compile_commands.json
+.compile-commands-raw.json
+flite-uefi/target/
+consumer-demo/target/
+libflite_elf.a

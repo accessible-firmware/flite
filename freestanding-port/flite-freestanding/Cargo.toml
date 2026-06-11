@@ -1,0 +1,32 @@
+[package]
+name = "flite-freestanding"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "flite_freestanding"
+
+[features]
+# By default this crate is no_std + alloc, which is what an embedded
+# consumer (e.g. a GRUB module statically linking this crate) needs to
+# emit ELF-compatible objects. The historical UEFI std-application build
+# path is preserved by opting into `std`: it pulls in `std::ffi::CString`,
+# routes printf output to `std::io::stdout()` (the UEFI console), and
+# uses `std::alloc` rather than `alloc::alloc`. All `std`-specific code
+# lives behind `cfg(feature = "std")` so the no_std build never reaches
+# `feature(uefi_std)` or unstable surfaces it would otherwise need.
+#
+# Default keeps `std` on so existing builds (the standalone `synth`
+# example, the `consumer-demo` crate) work unchanged. Embedders set
+# `default-features = false` to get the no_std path.
+default = ["std"]
+std = []
+
+[dependencies]
+libm = "0.2"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

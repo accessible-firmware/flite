@@ -1,0 +1,16 @@
+# Minimal example of a *separate* freestanding binary that depends on the
+# flite-freestanding library — the pattern for your own app that drives the
+# audio hardware.
+[package]
+name = "consumer-demo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+flite-freestanding = { path = "../flite-freestanding" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

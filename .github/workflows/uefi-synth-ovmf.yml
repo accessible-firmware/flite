@@ -1,0 +1,73 @@
+# Boots the flite-freestanding `synth` EFI app under QEMU + OVMF and confirms it
+# synthesizes "hello world" and writes hello.wav from inside the UEFI firmware
+# environment. The produced WAV must be byte-for-byte identical to the checked-in
+# golden reference (freestanding-port/tests/golden/hello.wav).
+#
+# Determinism note: synthesis output is fully deterministic — flite's rand() is a
+# fixed-seed LCG, all floating-point math is performed by the pinned `libm` crate
+# (via Cargo.lock) and IEEE-exact soft-float libcalls from `compiler_builtins`.
+# clang/LLVM only emits those libcalls in source order and does not do the
+# arithmetic, so the bytes reproduce across (unpinned) toolchain versions. If a
+# future runner image ever diverges, pin clang/LLVM + the nightly date and
+# regenerate the golden file.
+
+name: UEFI synth (OVMF)
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synth-wav:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install QEMU + OVMF + mtools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 ovmf mtools python3
+
+      - name: Install clang/LLVM 21
+        run: |
+          # The x86_64-unknown-uefi target needs LLVM >= 21: earlier versions
+          # (incl. 19/20) emit a COFF datalayout the backend rejects with
+          # "backend data layout 'e-m:w-...' does not match expected target
+          # description 'e-m:e-...'". Fixed by llvm/llvm-project#120632 + #127290,
+          # which first shipped in LLVM 21. Install it from apt.llvm.org.
+          wget -q https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 21
+          sudo apt-get install -y llvm-21   # provides llvm-ar-21 (COFF archiver)
+
+      - name: Install Rust nightly + UEFI target
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup target add --toolchain nightly x86_64-unknown-uefi
+
+      - name: Generate compile_commands.json
+        working-directory: freestanding-port
+        run: |
+          # Generate the compilation DB fresh for this checkout (correct absolute
+          # paths) rather than relying on a committed copy. See DEVELOPER_GUIDE.md.
+          make compile-commands
+
+      - name: Build COFF archive + synth.efi
+        working-directory: freestanding-port
+        run: |
+          make synth CLANG=clang-21 COFF_AR=llvm-ar-21
+
+      - name: Run the QEMU + OVMF test
+        working-directory: freestanding-port
+        run: |
+          # Boots synth.efi, asserts it writes hello.wav, and checks the result is
+          # bit-identical to tests/golden/hello.wav. OVMF paths are auto-detected.
+          ./tests/run-qemu-test.sh
