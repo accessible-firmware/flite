@@ -36,6 +36,17 @@ fn main() {
         ("flite_elf", "libflite_elf.a")
     };
 
+		let target = env::var("TARGET").unwrap_or_default();
+		let make_target = if target == "x86_64-unknown-uefi" { "coff" } else { "elf"
+		};
+		let port_dir = format!("{manifest}/..");               // freestanding-port/
+		let status = std::process::Command::new("make")
+				.arg("-C").arg(&port_dir)
+				.arg(make_target)
+				.status()
+				.expect("failed to run make for flite archive");
+		assert!(status.success(), "flite {make_target} archive build failed");
+
     println!("cargo:rustc-link-search=native={dir}");
     println!("cargo:rustc-link-lib=static={lib_name}");
     println!("cargo:rerun-if-changed={dir}/{lib_filename}");
